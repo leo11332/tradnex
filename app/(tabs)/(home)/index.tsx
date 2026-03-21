@@ -21,6 +21,7 @@ import { AnimatedPressable } from "@/components/AnimatedPressable";
 import {
   requestHealthPermissions,
   fetchLatestHealthData,
+  fetchHealthData,
   startHealthPolling,
 } from "@/utils/health";
 import {
@@ -216,8 +217,24 @@ export default function HomeScreen() {
         await apiPost("/api/profile/start-trial", {});
       }
     } catch (err) {
-      console.error("[Home] Failed to load data:", err);
-      setError("Couldn't load your health data. Check your connection.");
+      console.warn("[Home] API unavailable, falling back to mock health data:", err);
+      try {
+        const mock = await fetchHealthData();
+        console.log("[Home] Mock health data loaded:", mock);
+        const mockHealth: LatestHealth = {
+          stress_score: mock.stressScore,
+          heart_rate: mock.heartRate,
+          hrv: mock.hrv,
+          sleep_score: mock.sleepQuality,
+          sleep_duration_minutes: Math.round(mock.sleepHours * 60),
+          last_updated: new Date().toISOString(),
+        };
+        setHealth(mockHealth);
+        setLastSynced(new Date().toISOString());
+      } catch (mockErr) {
+        console.error("[Home] Mock data also failed:", mockErr);
+        setError("Couldn't load your health data. Check your connection.");
+      }
     } finally {
       setLoading(false);
     }

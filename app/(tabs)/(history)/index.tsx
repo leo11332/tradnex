@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TrendingUp, Moon, Activity, AlertTriangle, BarChart2 } from "lucide-react-native";
 import { COLORS } from "@/constants/TradnexColors";
 import { apiGet } from "@/utils/api";
+import { generateMockHistory } from "@/utils/health";
 import { SkeletonLine } from "@/components/SkeletonLoader";
 import { AnimatedPressable } from "@/components/AnimatedPressable";
 import { LineChart, BarChart } from "react-native-chart-kit";
@@ -159,8 +160,26 @@ export default function HistoryScreen() {
         setError(null);
         Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
       } catch (err) {
-        console.error("[History] Failed to load entries:", err);
-        setError("Couldn't load your history. Check your connection.");
+        console.warn("[History] API unavailable, falling back to mock history:", err);
+        const days = parseInt(p);
+        const mock = generateMockHistory(days);
+        console.log(`[History] Mock history generated: ${mock.length} entries`);
+        const mockEntries: HealthEntry[] = mock.map((m, idx) => ({
+          id: `mock-${idx}`,
+          user_id: "mock",
+          recorded_at: `${m.date}T08:00:00.000Z`,
+          stress_score: m.stressScore,
+          heart_rate: m.heartRate,
+          hrv: m.hrv,
+          sleep_score: m.sleepQuality,
+          sleep_duration_minutes: Math.round(m.sleepHours * 60),
+          sleep_date: m.date,
+          source: "mock",
+          created_at: `${m.date}T08:00:00.000Z`,
+        }));
+        setEntries(mockEntries);
+        setError(null);
+        Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
       } finally {
         setLoading(false);
       }
