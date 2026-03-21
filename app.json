@@ -18,13 +18,17 @@
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "remote-notification"
-        ]
+        ],
+        "NSHealthShareUsageDescription": "TRADNEX reads your heart rate, HRV, and sleep data to monitor your trading performance.",
+        "NSHealthUpdateUsageDescription": "TRADNEX may write stress scores to Apple Health."
       },
       "entitlements": {
         "aps-environment": "production",
         "com.apple.security.application-groups": [
           "group.com.placeholder.app.onesignal"
-        ]
+        ],
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
       }
     },
     "android": {
@@ -32,7 +36,12 @@
         "foregroundImage": "./assets/images/app-icon-bdv.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.placeholder.app"
+      "package": "com.placeholder.app",
+      "permissions": [
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_HEART_RATE_VARIABILITY"
+      ]
     },
     "web": {
       "favicon": "./assets/images/final_quest_240x240.png",
@@ -45,6 +54,7 @@
           "mode": "production"
         }
       ],
+      ["react-native-health-connect", {}],
       "expo-font",
       "expo-router",
       "expo-web-browser",
