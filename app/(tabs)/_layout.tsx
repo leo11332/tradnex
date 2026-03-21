@@ -1,6 +1,6 @@
 import React from "react";
 import { View, TouchableOpacity, Text, StyleSheet } from "react-native";
-import { Tabs, useRouter, usePathname } from "expo-router";
+import { Tabs, useRouter, useSegments } from "expo-router";
 import { BlurView } from "expo-blur";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Home, TrendingUp, Settings } from "lucide-react-native";
@@ -14,26 +14,22 @@ const TABS = [
 
 function FloatingTabBar() {
   const router = useRouter();
-  const pathname = usePathname();
+  // useSegments() returns the route segments array, e.g.:
+  //   ["(tabs)", "(home)", ...]
+  //   ["(tabs)", "(history)", ...]
+  //   ["(tabs)", "(settings)", ...]
+  // Segment at index 1 is the tab group name — use it for reliable matching.
+  const segments = useSegments();
+  const activeGroupSegment = segments[1] as string | undefined;
 
-  // Derive active tab from pathname segments.
-  // expo-router pathnames inside (tabs) look like:
-  //   "/"  or  "/index"           → home (initial route)
-  //   "/history"  or  "/(history)" → history
-  //   "/settings" or  "/(settings)" → settings
-  // We split on "/" and look for a segment that matches each tab's bare name.
-  const pathSegments = pathname.split("/").filter(Boolean);
-  const activeIndex = (() => {
-    for (let i = 0; i < TABS.length; i++) {
-      const bare = TABS[i].name.replace(/[()]/g, ""); // "home" | "history" | "settings"
-      if (pathSegments.some((s) => s.replace(/[()]/g, "") === bare)) {
-        return i;
-      }
+  const currentIndex = React.useMemo(() => {
+    if (activeGroupSegment) {
+      const idx = TABS.findIndex((t) => t.name === activeGroupSegment);
+      if (idx !== -1) return idx;
     }
-    // "/" with no segments → home tab
+    // Default to home if no match (e.g. initial render before navigation)
     return 0;
-  })();
-  const currentIndex = activeIndex;
+  }, [activeGroupSegment]);
 
   return (
     <SafeAreaView edges={["bottom"]} style={styles.safeArea}>

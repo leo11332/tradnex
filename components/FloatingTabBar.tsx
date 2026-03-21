@@ -7,7 +7,7 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { useRouter, usePathname } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/IconSymbol';
 import { BlurView } from 'expo-blur';
@@ -44,45 +44,20 @@ export default function FloatingTabBar({
   bottomMargin
 }: FloatingTabBarProps) {
   const router = useRouter();
-  const pathname = usePathname();
+  // useSegments() returns e.g. ["(tabs)", "(home)", ...] — segment[1] is the tab group name.
+  const segments = useSegments();
+  const activeGroupSegment = segments[1] as string | undefined;
   const theme = useTheme();
   const animatedValue = useSharedValue(0);
 
-  // Improved active tab detection with better path matching
+  // Match segment[1] directly against each tab's name (e.g. "(home)", "(history)", "(settings)")
   const activeTabIndex = React.useMemo(() => {
-    // Find the best matching tab based on the current pathname
-    let bestMatch = -1;
-    let bestMatchScore = 0;
-
-    tabs.forEach((tab, index) => {
-      let score = 0;
-
-      // Exact route match gets highest score
-      if (pathname === tab.route) {
-        score = 100;
-      }
-      // Check if pathname starts with tab route (for nested routes)
-      else if (pathname.startsWith(tab.route as string)) {
-        score = 80;
-      }
-      // Check if pathname contains the tab name
-      else if (pathname.includes(tab.name)) {
-        score = 60;
-      }
-      // Check for partial matches in the route
-      else if (tab.route.includes('/(tabs)/') && pathname.includes(tab.route.split('/(tabs)/')[1])) {
-        score = 40;
-      }
-
-      if (score > bestMatchScore) {
-        bestMatchScore = score;
-        bestMatch = index;
-      }
-    });
-
-    // Default to first tab if no match found
-    return bestMatch >= 0 ? bestMatch : 0;
-  }, [pathname, tabs]);
+    if (activeGroupSegment) {
+      const idx = tabs.findIndex((tab) => tab.name === activeGroupSegment);
+      if (idx !== -1) return idx;
+    }
+    return 0;
+  }, [activeGroupSegment, tabs]);
 
   React.useEffect(() => {
     if (activeTabIndex >= 0) {
