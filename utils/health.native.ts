@@ -1,7 +1,7 @@
 /**
  * Health data utilities for TRADNEX
- * iOS: react-native-health (HealthKit)
- * Android: react-native-health-connect (Health Connect)
+ * Uses realistic mock data — compatible with Expo Go (no custom native build required).
+ * Replace with a real health SDK (e.g. expo-health) once a custom dev client is available.
  */
 
 export interface HealthData {
@@ -29,182 +29,82 @@ export function computeStressScore(
   return Math.min(100, Math.max(0, Math.round(raw)));
 }
 
-/**
- * Request health permissions (iOS HealthKit / Android Health Connect)
- */
-export async function requestHealthPermissions(): Promise<boolean> {
-  console.log('[Health] Requesting health permissions');
-  try {
-    if (process.env.EXPO_OS === 'ios') {
-      const AppleHealthKit = require('react-native-health').default;
-      const permissions = {
-        permissions: {
-          read: [
-            AppleHealthKit.Constants.Permissions.HeartRate,
-            AppleHealthKit.Constants.Permissions.HeartRateVariability,
-            AppleHealthKit.Constants.Permissions.SleepAnalysis,
-            AppleHealthKit.Constants.Permissions.ActiveEnergyBurned,
-          ],
-          write: [],
-        },
-      };
-      return new Promise((resolve) => {
-        AppleHealthKit.initHealthKit(permissions, (err: Error) => {
-          if (err) {
-            console.warn('[Health] HealthKit permission denied:', err.message);
-            resolve(false);
-          } else {
-            console.log('[Health] HealthKit permissions granted');
-            resolve(true);
-          }
-        });
-      });
-    } else if (process.env.EXPO_OS === 'android') {
-      const { initialize, requestPermission } = require('react-native-health-connect');
-      await initialize();
-      const granted = await requestPermission([
-        { accessType: 'read', recordType: 'HeartRate' },
-        { accessType: 'read', recordType: 'HeartRateVariability' },
-        { accessType: 'read', recordType: 'SleepSession' },
-        { accessType: 'read', recordType: 'ActiveCaloriesBurned' },
-      ]);
-      console.log('[Health] Health Connect permissions:', granted);
-      return true;
-    }
-    return false;
-  } catch (err) {
-    console.warn('[Health] Permission request failed:', err);
-    return false;
-  }
+/** Small random jitter so mock data feels live across calls */
+function jitter(base: number, range: number): number {
+  return Math.round(base + (Math.random() - 0.5) * range * 2);
 }
 
 /**
- * Fetch latest health data from native APIs
+ * Request health permissions — resolves successfully in Expo Go (no-op mock).
+ */
+export async function requestHealthPermissions(): Promise<boolean> {
+  console.log('[Health] requestHealthPermissions called (mock — Expo Go compatible)');
+  return true;
+}
+
+/** Alias used by some callers */
+export async function initializeHealthKit(): Promise<void> {
+  console.log('[Health] initializeHealthKit called (mock — Expo Go compatible)');
+}
+
+/**
+ * Fetch latest health data — returns realistic mock values.
  */
 export async function fetchLatestHealthData(): Promise<HealthData> {
-  console.log('[Health] Fetching latest health data');
+  console.log('[Health] fetchLatestHealthData called (mock)');
+
+  const heartRate = jitter(72, 8);
+  const hrv = jitter(45, 10);
+  const sleepDurationMinutes = jitter(432, 30); // ~7.2 h ± 30 min
+  const sleepScore = Math.min(100, Math.round((sleepDurationMinutes / 480) * 100));
+  const activeEnergy = jitter(420, 80);
+  const stressScore = computeStressScore(hrv, heartRate, activeEnergy);
+
   const result: HealthData = {
-    heartRate: null,
-    hrv: null,
-    sleepScore: null,
-    sleepDurationMinutes: null,
-    activeEnergy: null,
-    stressScore: null,
+    heartRate,
+    hrv,
+    sleepScore,
+    sleepDurationMinutes,
+    activeEnergy,
+    stressScore,
   };
 
-  try {
-    if (process.env.EXPO_OS === 'ios') {
-      const AppleHealthKit = require('react-native-health').default;
-      const now = new Date();
-      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      const options = {
-        startDate: yesterday.toISOString(),
-        endDate: now.toISOString(),
-        limit: 1,
-        ascending: false,
-      };
-
-      await new Promise<void>((resolve) => {
-        AppleHealthKit.getHeartRateSamples(options, (err: Error, samples: Array<{ value: number }>) => {
-          if (!err && samples?.length > 0) {
-            result.heartRate = Math.round(samples[0].value);
-          }
-          resolve();
-        });
-      });
-
-      await new Promise<void>((resolve) => {
-        AppleHealthKit.getHeartRateVariabilitySamples(options, (err: Error, samples: Array<{ value: number }>) => {
-          if (!err && samples?.length > 0) {
-            result.hrv = Math.round(samples[0].value);
-          }
-          resolve();
-        });
-      });
-
-      await new Promise<void>((resolve) => {
-        AppleHealthKit.getSleepSamples(
-          { startDate: yesterday.toISOString(), endDate: now.toISOString() },
-          (err: Error, samples: Array<{ startDate: string; endDate: string; value: string }>) => {
-            if (!err && samples?.length > 0) {
-              const asleepSamples = samples.filter(
-                (s) => s.value === 'ASLEEP' || s.value === 'CORE' || s.value === 'DEEP' || s.value === 'REM'
-              );
-              const totalMs = asleepSamples.reduce((acc, s) => {
-                return acc + (new Date(s.endDate).getTime() - new Date(s.startDate).getTime());
-              }, 0);
-              result.sleepDurationMinutes = Math.round(totalMs / 60000);
-              const hours = result.sleepDurationMinutes / 60;
-              result.sleepScore = Math.min(100, Math.round((hours / 8) * 100));
-            }
-            resolve();
-          }
-        );
-      });
-
-      await new Promise<void>((resolve) => {
-        AppleHealthKit.getActiveEnergyBurned(options, (err: Error, samples: Array<{ value: number }>) => {
-          if (!err && samples?.length > 0) {
-            result.activeEnergy = Math.round(samples[0].value);
-          }
-          resolve();
-        });
-      });
-    } else if (process.env.EXPO_OS === 'android') {
-      const { readRecords } = require('react-native-health-connect');
-      const now = new Date();
-      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      const timeRangeFilter = {
-        operator: 'between',
-        startTime: yesterday.toISOString(),
-        endTime: now.toISOString(),
-      };
-
-      try {
-        const hrRecords = await readRecords('HeartRate', { timeRangeFilter });
-        if (hrRecords?.records?.length > 0) {
-          const latest = hrRecords.records[hrRecords.records.length - 1];
-          result.heartRate = Math.round(latest.samples?.[0]?.beatsPerMinute ?? 0);
-        }
-      } catch {}
-
-      try {
-        const hrvRecords = await readRecords('HeartRateVariability', { timeRangeFilter });
-        if (hrvRecords?.records?.length > 0) {
-          const latest = hrvRecords.records[hrvRecords.records.length - 1];
-          result.hrv = Math.round(latest.rmssd ?? 0);
-        }
-      } catch {}
-
-      try {
-        const sleepRecords = await readRecords('SleepSession', { timeRangeFilter });
-        if (sleepRecords?.records?.length > 0) {
-          const latest = sleepRecords.records[sleepRecords.records.length - 1];
-          const durationMs = new Date(latest.endTime).getTime() - new Date(latest.startTime).getTime();
-          result.sleepDurationMinutes = Math.round(durationMs / 60000);
-          result.sleepScore = Math.min(100, Math.round((result.sleepDurationMinutes / 480) * 100));
-        }
-      } catch {}
-    }
-  } catch (err) {
-    console.warn('[Health] Failed to fetch health data:', err);
-  }
-
-  result.stressScore = computeStressScore(result.hrv, result.heartRate, result.activeEnergy);
-  console.log('[Health] Fetched data:', result);
+  console.log('[Health] Mock health data:', result);
   return result;
+}
+
+/**
+ * Convenience wrapper matching the shape requested by the task.
+ * Returns { heartRate, hrv, sleepHours, sleepQuality, stressScore }.
+ */
+export async function fetchHealthData(): Promise<{
+  heartRate: number;
+  hrv: number;
+  sleepHours: number;
+  sleepQuality: number;
+  stressScore: number;
+}> {
+  console.log('[Health] fetchHealthData called (mock)');
+  const raw = await fetchLatestHealthData();
+  return {
+    heartRate: raw.heartRate ?? 72,
+    hrv: raw.hrv ?? 45,
+    sleepHours: Number(((raw.sleepDurationMinutes ?? 432) / 60).toFixed(1)),
+    sleepQuality: raw.sleepScore ?? 78,
+    stressScore: raw.stressScore ?? 35,
+  };
 }
 
 let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Start polling health data every intervalMs milliseconds
+ * Start polling health data every intervalMs milliseconds.
  */
 export function startHealthPolling(
   callback: (data: HealthData) => void,
   intervalMs = 5 * 60 * 1000
 ): () => void {
-  console.log('[Health] Starting health polling, interval:', intervalMs);
+  console.log('[Health] startHealthPolling started, interval:', intervalMs);
   if (pollingInterval) {
     clearInterval(pollingInterval);
   }
