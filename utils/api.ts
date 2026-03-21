@@ -1,52 +1,34 @@
-import Constants from "expo-constants";
-import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
-import { BEARER_TOKEN_KEY } from "@/lib/auth";
+import { supabase, SUPABASE_URL } from "@/lib/auth";
 
-export const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || "";
+// Edge function base URL
+const EDGE_URL = `${SUPABASE_URL}/functions/v1`;
 
-export const isBackendConfigured = (): boolean => {
-  return !!BACKEND_URL && BACKEND_URL.length > 0;
-};
+export const BACKEND_URL = EDGE_URL;
 
-export const getBearerToken = async (): Promise<string | null> => {
-  try {
-    if (Platform.OS === "web") {
-      return localStorage.getItem(BEARER_TOKEN_KEY);
-    } else {
-      return await SecureStore.getItemAsync(BEARER_TOKEN_KEY);
-    }
-  } catch (error) {
-    console.error("[API] Error retrieving bearer token:", error);
-    return null;
-  }
-};
+export const isBackendConfigured = (): boolean => true;
+
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
 
 export const apiCall = async <T = any>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> => {
-  if (!isBackendConfigured()) {
-    throw new Error("Backend URL not configured. Please rebuild the app.");
-  }
-
-  const url = `${BACKEND_URL}${endpoint}`;
+  const authHeaders = await getAuthHeader();
+  const url = endpoint.startsWith("http") ? endpoint : `${EDGE_URL}${endpoint}`;
 
   const fetchOptions: RequestInit = {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders,
       ...options?.headers,
     },
   };
-
-  const token = await getBearerToken();
-  if (token) {
-    fetchOptions.headers = {
-      ...fetchOptions.headers,
-      Authorization: `Bearer ${token}`,
-    };
-  }
 
   const response = await fetch(url, fetchOptions);
 
@@ -58,85 +40,67 @@ export const apiCall = async <T = any>(
   return response.json();
 };
 
-export const apiGet = async <T = any>(endpoint: string): Promise<T> => {
-  return apiCall<T>(endpoint, { method: "GET" });
-};
+export const apiGet = <T = any>(endpoint: string): Promise<T> =>
+  apiCall<T>(endpoint, { method: "GET" });
 
-export const apiPost = async <T = any>(endpoint: string, data: any): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-};
+export const apiPost = <T = any>(endpoint: string, data: any): Promise<T> =>
+  apiCall<T>(endpoint, { method: "POST", body: JSON.stringify(data) });
 
-export const apiPut = async <T = any>(endpoint: string, data: any): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-};
+export const apiPut = <T = any>(endpoint: string, data: any): Promise<T> =>
+  apiCall<T>(endpoint, { method: "PUT", body: JSON.stringify(data) });
 
-export const apiPatch = async <T = any>(endpoint: string, data: any): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
-};
+export const apiPatch = <T = any>(endpoint: string, data: any): Promise<T> =>
+  apiCall<T>(endpoint, { method: "PATCH", body: JSON.stringify(data) });
 
-export const apiDelete = async <T = any>(endpoint: string, data: any = {}): Promise<T> => {
-  return apiCall<T>(endpoint, {
-    method: "DELETE",
-    body: JSON.stringify(data),
-  });
-};
-
-export const authenticatedApiCall = async <T = any>(
+export const apiDelete = <T = any>(
   endpoint: string,
-  options?: RequestInit
-): Promise<T> => {
-  const token = await getBearerToken();
+  data: any = {}
+): Promise<T> =>
+  apiCall<T>(endpoint, { method: "DELETE", body: JSON.stringify(data) });
 
-  if (!token) {
-    throw new Error("Authentication token not found. Please sign in.");
-  }
+// Authenticated variants (same as above — auth header is always injected)
+export const authenticatedApiCall = apiCall;
+export const authenticatedGet = apiGet;
+export const authenticatedPost = apiPost;
+export const authenticatedPut = apiPut;
+export const authenticatedPatch = apiPatch;
+export const authenticatedDelete = apiDelete;
 
-  return apiCall<T>(endpoint, {
-    ...options,
-    headers: {
-      ...options?.headers,
-      Authorization: `Bearer ${token}`,
-    },
-  });
+// Convenience helpers for TRADNEX endpoints
+export const profileApi = {
+  get: () => apiGet("/api-profile"),
+  update: (data: { stress_threshold?: number; heart_rate_threshold?: number }) =>
+    apiPut("/api-profile", data),
+  startTrial: () => apiPost("/api-profile/start-trial", {}),
 };
 
-export const authenticatedGet = async <T = any>(endpoint: string): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, { method: "GET" });
+export const healthApi = {
+  getEntries: (params?: { days?: number; type?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.days) qs.set("days", String(params.days));
+    if (params?.type) qs.set("type", params.type);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
+    return apiGet(`/api-health/entries${query}`);
+  },
+  getLatest: () => apiGet("/api-health/latest"),
+  addEntry: (data: {
+    stress_score?: number;
+    heart_rate?: number;
+    hrv?: number;
+    sleep_score?: number;
+    sleep_duration_minutes?: number;
+    sleep_date?: string;
+    recorded_at?: string;
+    source?: string;
+  }) => apiPost("/api-health/entries", data),
 };
 
-export const authenticatedPost = async <T = any>(endpoint: string, data: any): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-};
-
-export const authenticatedPut = async <T = any>(endpoint: string, data: any): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-};
-
-export const authenticatedPatch = async <T = any>(endpoint: string, data: any): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "PATCH",
-    body: JSON.stringify(data),
-  });
-};
-
-export const authenticatedDelete = async <T = any>(endpoint: string, data: any = {}): Promise<T> => {
-  return authenticatedApiCall<T>(endpoint, {
-    method: "DELETE",
-    body: JSON.stringify(data),
-  });
+export const aiApi = {
+  getRecommendation: (data: {
+    stress_score?: number;
+    heart_rate?: number;
+    hrv?: number;
+    sleep_score?: number;
+    sleep_duration_minutes?: number;
+  }) => apiPost("/api-ai-recommendation", data),
 };

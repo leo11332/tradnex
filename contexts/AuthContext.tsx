@@ -1,17 +1,17 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 import { Platform } from "react-native";
-import * as Linking from "expo-linking";
-import { authClient, setBearerToken, clearAuthTokens } from "@/lib/auth";
-
-interface User {
-  id: string;
-  email: string;
-  name?: string;
-  image?: string;
-}
+import { Session, User } from "@supabase/supabase-js";
+import { supabase } from "@/lib/auth";
 
 interface AuthContextType {
   user: User | null;
+  session: Session | null;
   loading: boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, name?: string) => Promise<void>;
@@ -23,164 +23,117 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function openOAuthPopup(provider: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const popupUrl = `${window.location.origin}/auth-popup?provider=${provider}`;
-    const width = 500;
-    const height = 600;
-    const left = window.screenX + (window.outerWidth - width) / 2;
-    const top = window.screenY + (window.outerHeight - height) / 2;
-
-    const popup = window.open(
-      popupUrl,
-      "oauth-popup",
-      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
-    );
-
-    if (!popup) {
-      reject(new Error("Failed to open popup. Please allow popups."));
-      return;
-    }
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.data?.type === "oauth-success" && event.data?.token) {
-        window.removeEventListener("message", handleMessage);
-        clearInterval(checkClosed);
-        resolve(event.data.token);
-      } else if (event.data?.type === "oauth-error") {
-        window.removeEventListener("message", handleMessage);
-        clearInterval(checkClosed);
-        reject(new Error(event.data.error || "OAuth failed"));
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-
-    const checkClosed = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(checkClosed);
-        window.removeEventListener("message", handleMessage);
-        reject(new Error("Authentication cancelled"));
-      }
-    }, 500);
-  });
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchUser();
-
-    const subscription = Linking.addEventListener("url", (event) => {
-      console.log("Deep link received, refreshing user session");
-      fetchUser();
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
     });
 
-    const intervalId = setInterval(() => {
-      fetchUser();
-    }, 5 * 60 * 1000);
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      }
+    );
 
-    return () => {
-      subscription.remove();
-      clearInterval(intervalId);
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   const fetchUser = async () => {
-    try {
-      setLoading(true);
-      const session = await authClient.getSession();
-      if (session?.data?.user) {
-        setUser(session.data.user as User);
-        if (session.data.session?.token) {
-          await setBearerToken(session.data.session.token);
-        }
-      } else {
-        setUser(null);
-        await clearAuthTokens();
-      }
-    } catch (error) {
-      console.error("Failed to fetch user:", error);
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+    const { data: { session } } = await supabase.auth.getSession();
+    setSession(session);
+    setUser(session?.user ?? null);
   };
 
   const signInWithEmail = async (email: string, password: string) => {
-    await authClient.signIn.email({ email, password });
-    await fetchUser();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
   };
 
-  const signUpWithEmail = async (email: string, password: string, name?: string) => {
-    await authClient.signUp.email({ email, password, name });
-    await fetchUser();
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    name?: string
+  ) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name } },
+    });
+    if (error) throw new Error(error.message);
   };
 
-  const signInWithSocial = async (provider: "google" | "apple") => {
+  const signInWithGoogle = async () => {
     if (Platform.OS === "web") {
-      const token = await openOAuthPopup(provider);
-      await setBearerToken(token);
-      await fetchUser();
-    } else {
-      const { error } = await authClient.signIn.social({
-        provider,
-        callbackURL: "tradnex://auth-callback",
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/auth-callback` },
       });
-      if (error) {
-        throw new Error(error.message || "Social sign in failed");
-      }
-      await fetchUser();
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: "tradnex://auth-callback" },
+      });
+      if (error) throw new Error(error.message);
     }
   };
 
-  const signInWithGoogle = () => signInWithSocial("google");
-
   const signInWithApple = async () => {
     if (Platform.OS === "ios") {
-      // Native Apple Sign In on iOS — shows the system Face ID / password modal
-      const AppleAuthentication = require("expo-apple-authentication");
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      if (!credential.identityToken) {
-        throw new Error("No identity token received from Apple");
+      try {
+        const AppleAuthentication = require("expo-apple-authentication");
+        const credential = await AppleAuthentication.signInAsync({
+          requestedScopes: [
+            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+            AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          ],
+        });
+        if (!credential.identityToken) {
+          throw new Error("No identity token received from Apple");
+        }
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: "apple",
+          token: credential.identityToken,
+        });
+        if (error) throw new Error(error.message);
+      } catch (err: any) {
+        if (err?.code === "ERR_REQUEST_CANCELED") return;
+        throw err;
       }
-      const { error } = await authClient.signIn.social({
-        provider: "apple",
-        idToken: credential.identityToken,
-      });
-      if (error) {
-        throw new Error(error.message || "Apple sign in failed");
-      }
-      await fetchUser();
     } else {
-      // Web / Android: OAuth redirect flow
-      await signInWithSocial("apple");
+      const redirectTo =
+        Platform.OS === "web"
+          ? `${typeof window !== "undefined" ? window.location.origin : ""}/auth-callback`
+          : "tradnex://auth-callback";
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "apple",
+        options: { redirectTo },
+      });
+      if (error) throw new Error(error.message);
     }
   };
 
   const signOut = async () => {
-    try {
-      await authClient.signOut();
-    } catch (error) {
-      console.error("Sign out failed (API):", error);
-    } finally {
-      setUser(null);
-      await clearAuthTokens();
-    }
+    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        session,
         loading,
         signInWithEmail,
         signUpWithEmail,
