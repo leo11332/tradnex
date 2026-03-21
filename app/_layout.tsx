@@ -90,6 +90,7 @@ function AppContent() {
       <NavigationGuard />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="auth-screen" options={{ headerShown: false }} />
         <Stack.Screen
           name="auth-popup"

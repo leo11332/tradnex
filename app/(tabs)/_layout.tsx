@@ -16,13 +16,24 @@ function FloatingTabBar() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const activeIndex = TABS.findIndex((t) => {
-    if (pathname === t.route) return true;
-    if (pathname.startsWith(t.route)) return true;
-    if (pathname.includes(t.name.replace(/[()]/g, ""))) return true;
-    return false;
-  });
-  const currentIndex = activeIndex >= 0 ? activeIndex : 0;
+  // Derive active tab from pathname segments.
+  // expo-router pathnames inside (tabs) look like:
+  //   "/"  or  "/index"           → home (initial route)
+  //   "/history"  or  "/(history)" → history
+  //   "/settings" or  "/(settings)" → settings
+  // We split on "/" and look for a segment that matches each tab's bare name.
+  const pathSegments = pathname.split("/").filter(Boolean);
+  const activeIndex = (() => {
+    for (let i = 0; i < TABS.length; i++) {
+      const bare = TABS[i].name.replace(/[()]/g, ""); // "home" | "history" | "settings"
+      if (pathSegments.some((s) => s.replace(/[()]/g, "") === bare)) {
+        return i;
+      }
+    }
+    // "/" with no segments → home tab
+    return 0;
+  })();
+  const currentIndex = activeIndex;
 
   return (
     <SafeAreaView edges={["bottom"]} style={styles.safeArea}>
