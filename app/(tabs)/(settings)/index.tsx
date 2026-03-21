@@ -11,7 +11,6 @@ import Slider from "@react-native-community/slider";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import {
-  User,
   Bell,
   Heart,
   Activity,
@@ -22,6 +21,8 @@ import {
   AlertCircle,
   Star,
   ChevronRight,
+  Moon,
+  Zap,
 } from "lucide-react-native";
 import { COLORS } from "@/constants/TradnexColors";
 import { useAuth } from "@/contexts/AuthContext";
@@ -34,6 +35,8 @@ import {
   fetchLatestHealthData,
 } from "@/utils/health";
 import { formatRelativeDate } from "@/utils/dateUtils";
+import { DEFAULT_THRESHOLDS, Thresholds, restartHealthMonitor } from "@/utils/healthMonitor";
+import { saveThresholds, loadThresholds } from "@/utils/thresholdStorage";
 
 interface UserProfile {
   id: string;
@@ -95,6 +98,113 @@ function Divider() {
   );
 }
 
+interface AlertSliderRowProps {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  accentColor: string;
+  onValueChange: (v: number) => void;
+}
+
+function AlertSliderRow({
+  icon,
+  label,
+  value,
+  unit,
+  min,
+  max,
+  step,
+  accentColor,
+  onValueChange,
+}: AlertSliderRowProps) {
+  const displayValue = step < 1 ? Number(value).toFixed(1) : String(Math.round(value));
+  const labelText = label + " " + displayValue + unit;
+  return (
+    <View style={{ paddingVertical: 14 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 10,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {icon}
+          <Text
+            style={{
+              fontSize: 14,
+              fontWeight: "600",
+              color: COLORS.text,
+              fontFamily: "SpaceGrotesk-SemiBold",
+            }}
+          >
+            {label}
+          </Text>
+        </View>
+        <View
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            borderRadius: 8,
+            backgroundColor: `${accentColor}18`,
+            borderWidth: 1,
+            borderColor: `${accentColor}30`,
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "700",
+              color: accentColor,
+              fontFamily: "SpaceGrotesk-Bold",
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {labelText}
+          </Text>
+        </View>
+      </View>
+      <Slider
+        minimumValue={min}
+        maximumValue={max}
+        value={value}
+        onValueChange={onValueChange}
+        minimumTrackTintColor={accentColor}
+        maximumTrackTintColor={COLORS.surfaceElevated}
+        thumbTintColor={accentColor}
+        step={step}
+      />
+      <View
+        style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 2 }}
+      >
+        <Text
+          style={{
+            fontSize: 10,
+            color: COLORS.textTertiary,
+            fontFamily: "SpaceGrotesk-Regular",
+          }}
+        >
+          {step < 1 ? Number(min).toFixed(1) : String(min)}
+        </Text>
+        <Text
+          style={{
+            fontSize: 10,
+            color: COLORS.textTertiary,
+            fontFamily: "SpaceGrotesk-Regular",
+          }}
+        >
+          {step < 1 ? Number(max).toFixed(1) : String(max)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
   const { isSubscribed } = useSubscription();
@@ -110,12 +220,24 @@ export default function SettingsScreen() {
   const [hrThreshold, setHrThreshold] = useState(100);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Local notification thresholds
+  const [localThresholds, setLocalThresholds] = useState<Thresholds>(DEFAULT_THRESHOLDS);
+  const [alertSaveSuccess, setAlertSaveSuccess] = useState(false);
+  const alertSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadProfile();
+    loadSavedThresholds();
   }, []);
+
+  const loadSavedThresholds = async () => {
+    console.log("[Settings] Loading saved alert thresholds");
+    const t = await loadThresholds();
+    setLocalThresholds(t);
+  };
 
   const loadProfile = async () => {
     console.log("[Settings] Loading profile");
@@ -132,10 +254,29 @@ export default function SettingsScreen() {
     }
   };
 
-  const saveThresholds = useCallback(
+  const persistAlertThresholds = useCallback(async (t: Thresholds) => {
+    console.log("[Settings] Persisting alert thresholds:", t);
+    await saveThresholds(t);
+    restartHealthMonitor(t);
+    setAlertSaveSuccess(true);
+    if (alertSaveTimer.current) clearTimeout(alertSaveTimer.current);
+    alertSaveTimer.current = setTimeout(() => setAlertSaveSuccess(false), 2000);
+  }, []);
+
+  const handleAlertThresholdChange = useCallback(
+    (key: keyof Thresholds, val: number) => {
+      const updated = { ...localThresholds, [key]: val };
+      setLocalThresholds(updated);
+      if (alertSaveTimer.current) clearTimeout(alertSaveTimer.current);
+      alertSaveTimer.current = setTimeout(() => persistAlertThresholds(updated), 600);
+    },
+    [localThresholds, persistAlertThresholds]
+  );
+
+  const saveProfileThresholds = useCallback(
     async (stress: number, hr: number) => {
       setSaving(true);
-      console.log("[Settings] Saving thresholds", { stress, hr });
+      console.log("[Settings] Saving profile thresholds", { stress, hr });
       try {
         await apiPut("/api/profile", {
           stress_threshold: stress,
@@ -143,9 +284,9 @@ export default function SettingsScreen() {
         });
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2000);
-        console.log("[Settings] Thresholds saved");
+        console.log("[Settings] Profile thresholds saved");
       } catch (err) {
-        console.error("[Settings] Failed to save thresholds:", err);
+        console.error("[Settings] Failed to save profile thresholds:", err);
       } finally {
         setSaving(false);
       }
@@ -157,14 +298,14 @@ export default function SettingsScreen() {
     const rounded = Math.round(val);
     setStressThreshold(rounded);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => saveThresholds(rounded, hrThreshold), 800);
+    saveTimer.current = setTimeout(() => saveProfileThresholds(rounded, hrThreshold), 800);
   };
 
   const handleHrChange = (val: number) => {
     const rounded = Math.round(val);
     setHrThreshold(rounded);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => saveThresholds(stressThreshold, rounded), 800);
+    saveTimer.current = setTimeout(() => saveProfileThresholds(stressThreshold, rounded), 800);
   };
 
   const handleSyncHealth = async () => {
@@ -486,6 +627,93 @@ export default function SettingsScreen() {
                     </Text>
                   </>
                 )}
+              </View>
+            )}
+          </SectionCard>
+
+          {/* Local Notification Alert Thresholds */}
+          <SectionTitle title="SEUILS D'ALERTE" />
+          <SectionCard>
+            <View style={{ padding: 16 }}>
+
+              {/* Stress max */}
+              <AlertSliderRow
+                icon={<Activity size={16} color={COLORS.danger} />}
+                label="Alerte stress à"
+                value={localThresholds.stressMax}
+                unit="/100"
+                min={40}
+                max={90}
+                step={1}
+                accentColor={COLORS.danger}
+                onValueChange={(v) => {
+                  console.log("[Settings] Alert stress slider changed:", v);
+                  handleAlertThresholdChange("stressMax", v);
+                }}
+              />
+
+              <Divider />
+
+              {/* Heart rate max */}
+              <AlertSliderRow
+                icon={<Heart size={16} color={COLORS.warning} />}
+                label="Alerte FC à"
+                value={localThresholds.heartRateMax}
+                unit=" bpm"
+                min={80}
+                max={130}
+                step={1}
+                accentColor={COLORS.warning}
+                onValueChange={(v) => {
+                  console.log("[Settings] Alert heart rate slider changed:", v);
+                  handleAlertThresholdChange("heartRateMax", v);
+                }}
+              />
+
+              <Divider />
+
+              {/* HRV min */}
+              <AlertSliderRow
+                icon={<Zap size={16} color={COLORS.primary} />}
+                label="Alerte HRV sous"
+                value={localThresholds.hrvMin}
+                unit=" ms"
+                min={10}
+                max={50}
+                step={1}
+                accentColor={COLORS.primary}
+                onValueChange={(v) => {
+                  console.log("[Settings] Alert HRV slider changed:", v);
+                  handleAlertThresholdChange("hrvMin", v);
+                }}
+              />
+
+              <Divider />
+
+              {/* Sleep hours min */}
+              <AlertSliderRow
+                icon={<Moon size={16} color={COLORS.textSecondary} />}
+                label="Alerte sommeil sous"
+                value={localThresholds.sleepHoursMin}
+                unit="h"
+                min={4}
+                max={7}
+                step={0.5}
+                accentColor={COLORS.textSecondary}
+                onValueChange={(v) => {
+                  console.log("[Settings] Alert sleep hours slider changed:", v);
+                  handleAlertThresholdChange("sleepHoursMin", v);
+                }}
+              />
+
+            </View>
+
+            {alertSaveSuccess && (
+              <View style={{ paddingHorizontal: 16, paddingBottom: 12, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <CheckCircle size={14} color={COLORS.success} />
+                <Text style={{ fontSize: 12, color: COLORS.success, fontFamily: "SpaceGrotesk-Regular" }}>
+                  Seuils enregistrés
+                </Text>
               </View>
             )}
           </SectionCard>

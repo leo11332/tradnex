@@ -1,5 +1,6 @@
 import "react-native-reanimated";
 import React, { useEffect } from "react";
+import { Platform } from "react-native";
 import { useFonts } from "expo-font";
 import { Stack, useRouter, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -13,6 +14,8 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SubscriptionProvider } from "@/contexts/SubscriptionContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
 import { COLORS } from "@/constants/TradnexColors";
+import { startHealthMonitor, stopHealthMonitor } from "@/utils/healthMonitor";
+import { loadThresholds } from "@/utils/thresholdStorage";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -78,6 +81,59 @@ function LoadingScreen() {
   );
 }
 
+function HealthMonitorManager() {
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user) {
+      stopHealthMonitor();
+      return;
+    }
+
+    if (Platform.OS === 'web') return;
+
+    let cancelled = false;
+
+    async function requestPermissionsAndStart() {
+      try {
+        // Dynamic import keeps expo-notifications out of the web bundle
+        const Notifications = await import('expo-notifications');
+
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+          }),
+        });
+
+        console.log('[HealthMonitor] Requesting notification permissions');
+        const { status } = await Notifications.requestPermissionsAsync();
+        console.log('[HealthMonitor] Notification permission status:', status);
+      } catch (e) {
+        console.warn('[HealthMonitor] Could not request notification permissions:', e);
+      }
+
+      if (cancelled) return;
+
+      const thresholds = await loadThresholds();
+      if (cancelled) return;
+
+      console.log('[HealthMonitor] Starting monitor for user:', user.id);
+      startHealthMonitor(thresholds);
+    }
+
+    requestPermissionsAndStart();
+
+    return () => {
+      cancelled = true;
+      stopHealthMonitor();
+    };
+  }, [user?.id]);
+
+  return null;
+}
+
 function AppContent() {
   const { loading: authLoading } = useAuth();
 
@@ -88,6 +144,7 @@ function AppContent() {
   return (
     <>
       <NavigationGuard />
+      <HealthMonitorManager />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
