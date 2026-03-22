@@ -54,7 +54,10 @@
           "mode": "production"
         }
       ],
-      ["react-native-health-connect", {}],
+      [
+        "react-native-health-connect",
+        {}
+      ],
       "expo-font",
       "expo-router",
       "expo-web-browser",

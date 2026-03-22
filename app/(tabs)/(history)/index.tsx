@@ -5,17 +5,20 @@ import {
   ScrollView,
   RefreshControl,
   Animated,
-  TouchableOpacity,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { TrendingUp, Moon, Activity, AlertTriangle, BarChart2 } from "lucide-react-native";
+import { CalendarDays, BarChart3, Calendar, AlertTriangle, ClipboardList } from "lucide-react-native";
 import { COLORS } from "@/constants/TradnexColors";
 import { apiGet } from "@/utils/api";
 import { generateMockHistory } from "@/utils/health";
 import { SkeletonLine } from "@/components/SkeletonLoader";
 import { AnimatedPressable } from "@/components/AnimatedPressable";
-import { LineChart, BarChart } from "react-native-chart-kit";
-import { useWindowDimensions } from "react-native";
+import { DayCard, DayData } from "@/components/health/DayCard";
+import { WeeklyReport } from "@/components/health/WeeklyReport";
+import { MonthlyReport } from "@/components/health/MonthlyReport";
+
+type ViewMode = "jour" | "semaine" | "mois";
 
 interface HealthEntry {
   id: string;
@@ -31,217 +34,295 @@ interface HealthEntry {
   created_at: string;
 }
 
-type Period = "7" | "30";
+const PERIODS: { key: ViewMode; label: string; icon: React.ReactNode }[] = [
+  { key: "jour", label: "Jour", icon: <CalendarDays size={14} color="inherit" /> },
+  { key: "semaine", label: "Semaine", icon: <BarChart3 size={14} color="inherit" /> },
+  { key: "mois", label: "Mois", icon: <Calendar size={14} color="inherit" /> },
+];
 
-function getStressColor(value: number): string {
-  if (value < 40) return COLORS.success;
-  if (value <= 70) return COLORS.warning;
-  return COLORS.danger;
-}
+function SkeletonDayCard({ index }: { index: number }) {
+  const opacity = useRef(new Animated.Value(0.3)).current;
 
-function formatShortDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.7, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
 
-function aggregateByDay(entries: HealthEntry[]): Map<string, HealthEntry[]> {
-  const map = new Map<string, HealthEntry[]>();
-  for (const e of entries) {
-    const day = e.recorded_at.split("T")[0];
-    if (!map.has(day)) map.set(day, []);
-    map.get(day)!.push(e);
-  }
-  return map;
-}
-
-function avg(vals: (number | null)[]): number {
-  const valid = vals.filter((v): v is number => v !== null);
-  if (!valid.length) return 0;
-  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
-}
-
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-      {icon}
-      <Text
-        style={{
-          fontSize: 15,
-          fontWeight: "700",
-          color: COLORS.text,
-          fontFamily: "SpaceGrotesk-Bold",
-          letterSpacing: 0.3,
-        }}
-      >
-        {title}
-      </Text>
-    </View>
-  );
-}
-
-function ChartCard({ children }: { children: React.ReactNode }) {
-  return (
-    <View
+    <Animated.View
       style={{
+        opacity,
         backgroundColor: COLORS.surface,
         borderRadius: 16,
         borderWidth: 1,
         borderColor: COLORS.border,
+        marginBottom: 12,
         overflow: "hidden",
-        marginBottom: 24,
-        padding: 16,
       }}
     >
-      {children}
+      <View style={{ height: 3, backgroundColor: COLORS.surfaceElevated }} />
+      <View style={{ padding: 16, gap: 12 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <SkeletonLine width={100} height={14} borderRadius={7} />
+          <SkeletonLine width={72} height={22} borderRadius={11} />
+        </View>
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          <SkeletonLine width={80} height={28} borderRadius={8} />
+          <SkeletonLine width={88} height={28} borderRadius={8} />
+          <SkeletonLine width={96} height={28} borderRadius={8} />
+          <SkeletonLine width={84} height={28} borderRadius={8} />
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+function PeriodSelector({
+  active,
+  onChange,
+}: {
+  active: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) {
+  const indicatorAnim = useRef(new Animated.Value(0)).current;
+  const { width } = useWindowDimensions();
+  const containerWidth = width - 40; // screen padding
+  const pillWidth = (containerWidth - 8) / 3; // 3 options, 4px padding each side
+
+  const indexMap: Record<ViewMode, number> = { jour: 0, semaine: 1, mois: 2 };
+
+  useEffect(() => {
+    Animated.spring(indicatorAnim, {
+      toValue: indexMap[active] * pillWidth,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 6,
+    }).start();
+  }, [active, pillWidth]);
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        backgroundColor: COLORS.surfaceSecondary,
+        borderRadius: 14,
+        padding: 4,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        position: "relative",
+      }}
+    >
+      {/* Animated pill indicator */}
+      <Animated.View
+        style={{
+          position: "absolute",
+          top: 4,
+          left: 4,
+          width: pillWidth,
+          height: "100%",
+          backgroundColor: COLORS.primary,
+          borderRadius: 10,
+          transform: [{ translateX: indicatorAnim }],
+          shadowColor: COLORS.primary,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.35,
+          shadowRadius: 8,
+          elevation: 4,
+        }}
+      />
+
+      {PERIODS.map((p) => {
+        const isActive = active === p.key;
+        const iconColor = isActive ? "#fff" : COLORS.textSecondary;
+        return (
+          <AnimatedPressable
+            key={p.key}
+            onPress={() => {
+              console.log(`[History] Period selector changed to: ${p.key}`);
+              onChange(p.key);
+            }}
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              paddingVertical: 10,
+              borderRadius: 10,
+              zIndex: 1,
+            }}
+          >
+            <CalendarDays
+              size={13}
+              color={iconColor}
+              style={{ display: p.key === "jour" ? "flex" : "none" }}
+            />
+            <BarChart3
+              size={13}
+              color={iconColor}
+              style={{ display: p.key === "semaine" ? "flex" : "none" }}
+            />
+            <Calendar
+              size={13}
+              color={iconColor}
+              style={{ display: p.key === "mois" ? "flex" : "none" }}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "600",
+                color: isActive ? "#fff" : COLORS.textSecondary,
+                fontFamily: "SpaceGrotesk-SemiBold",
+              }}
+            >
+              {p.label}
+            </Text>
+          </AnimatedPressable>
+        );
+      })}
     </View>
   );
 }
 
-function EmptyChart({ label }: { label: string }) {
+function EmptyDayState() {
   return (
-    <View style={{ alignItems: "center", paddingVertical: 32 }}>
+    <View style={{ alignItems: "center", paddingVertical: 64, paddingHorizontal: 32 }}>
       <View
         style={{
-          width: 56,
-          height: 56,
-          borderRadius: 16,
+          width: 72,
+          height: 72,
+          borderRadius: 20,
           backgroundColor: COLORS.primaryMuted,
           alignItems: "center",
           justifyContent: "center",
-          marginBottom: 12,
+          marginBottom: 16,
+          borderWidth: 1,
+          borderColor: COLORS.border,
         }}
       >
-        <BarChart2 size={24} color={COLORS.primary} />
+        <ClipboardList size={32} color={COLORS.primary} />
       </View>
-      <Text style={{ color: COLORS.textSecondary, fontSize: 14, fontFamily: "SpaceGrotesk-Regular" }}>
-        No {label} data yet
+      <Text
+        style={{
+          fontSize: 17,
+          fontWeight: "700",
+          color: COLORS.text,
+          fontFamily: "SpaceGrotesk-Bold",
+          textAlign: "center",
+          marginBottom: 8,
+        }}
+      >
+        Aucun historique
+      </Text>
+      <Text
+        style={{
+          fontSize: 14,
+          color: COLORS.textSecondary,
+          fontFamily: "SpaceGrotesk-Regular",
+          textAlign: "center",
+          lineHeight: 20,
+        }}
+      >
+        Vos données de santé quotidiennes apparaîtront ici une fois synchronisées.
       </Text>
     </View>
   );
 }
 
-const CHART_CONFIG = {
-  backgroundGradientFrom: COLORS.surface,
-  backgroundGradientTo: COLORS.surface,
-  color: (opacity = 1) => `rgba(14, 165, 233, ${opacity})`,
-  labelColor: () => COLORS.textTertiary,
-  strokeWidth: 2,
-  decimalPlaces: 0,
-  propsForDots: {
-    r: "3",
-    strokeWidth: "1",
-    stroke: COLORS.primary,
-  },
-  propsForBackgroundLines: {
-    stroke: COLORS.divider,
-    strokeDasharray: "",
-  },
-};
+function convertEntriesToDayData(entries: HealthEntry[]): DayData[] {
+  const byDay = new Map<string, HealthEntry[]>();
+  for (const e of entries) {
+    const day = e.recorded_at.split("T")[0];
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day)!.push(e);
+  }
+
+  const result: DayData[] = [];
+  byDay.forEach((dayEntries, date) => {
+    const avg = (vals: (number | null)[]) => {
+      const valid = vals.filter((v): v is number => v !== null);
+      if (!valid.length) return 0;
+      return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+    };
+    const avgFloat = (vals: (number | null)[]) => {
+      const valid = vals.filter((v): v is number => v !== null);
+      if (!valid.length) return 7;
+      return valid.reduce((a, b) => a + b, 0) / valid.length;
+    };
+
+    result.push({
+      date,
+      heartRate: avg(dayEntries.map((e) => e.heart_rate)) || 72,
+      hrv: avg(dayEntries.map((e) => e.hrv)) || 50,
+      sleepHours: Number((avgFloat(dayEntries.map((e) => e.sleep_duration_minutes)) / 60).toFixed(1)),
+      sleepQuality: avg(dayEntries.map((e) => e.sleep_score)) || 70,
+      stressScore: avg(dayEntries.map((e) => e.stress_score)) || 50,
+    });
+  });
+
+  return result.sort((a, b) => b.date.localeCompare(a.date));
+}
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const chartWidth = width - 40 - 32; // screen padding + card padding
 
-  const [period, setPeriod] = useState<Period>("7");
-  const [entries, setEntries] = useState<HealthEntry[]>([]);
+  const [viewMode, setViewMode] = useState<ViewMode>("jour");
+  const [allData, setAllData] = useState<DayData[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [monthOffset, setMonthOffset] = useState(0);
 
-  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const headerFade = useRef(new Animated.Value(0)).current;
 
-  const loadEntries = useCallback(
-    async (p: Period) => {
-      console.log(`[History] Loading entries for ${p} days`);
-      try {
-        const data = await apiGet<HealthEntry[]>(`/api/health/entries?days=${p}`);
-        setEntries(data ?? []);
-        setError(null);
-        Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-      } catch (err) {
-        console.warn("[History] API unavailable, falling back to mock history:", err);
-        const days = parseInt(p);
-        const mock = generateMockHistory(days);
-        console.log(`[History] Mock history generated: ${mock.length} entries`);
-        const mockEntries: HealthEntry[] = mock.map((m, idx) => ({
-          id: `mock-${idx}`,
-          user_id: "mock",
-          recorded_at: `${m.date}T08:00:00.000Z`,
-          stress_score: m.stressScore,
-          heart_rate: m.heartRate,
-          hrv: m.hrv,
-          sleep_score: m.sleepQuality,
-          sleep_duration_minutes: Math.round(m.sleepHours * 60),
-          sleep_date: m.date,
-          source: "mock",
-          created_at: `${m.date}T08:00:00.000Z`,
-        }));
-        setEntries(mockEntries);
-        setError(null);
-        Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-      } finally {
-        setLoading(false);
-      }
-    },
-    [fadeAnim]
-  );
+  const loadData = useCallback(async () => {
+    console.log("[History] Loading health history data");
+    try {
+      const data = await apiGet<HealthEntry[]>("/api/health/entries?days=90");
+      const converted = convertEntriesToDayData(data ?? []);
+      setAllData(converted);
+      setError(null);
+      console.log(`[History] Loaded ${converted.length} days from API`);
+    } catch (err) {
+      console.warn("[History] API unavailable, using mock data:", err);
+      const mock = generateMockHistory(30);
+      const mockData: DayData[] = mock.map((m) => ({
+        date: m.date,
+        heartRate: m.heartRate,
+        hrv: m.hrv,
+        sleepHours: m.sleepHours,
+        sleepQuality: m.sleepQuality,
+        stressScore: m.stressScore,
+      }));
+      setAllData(mockData.sort((a, b) => b.date.localeCompare(a.date)));
+      setError(null);
+      console.log(`[History] Mock data loaded: ${mockData.length} days`);
+    } finally {
+      setLoading(false);
+      Animated.timing(headerFade, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, []);
 
   useEffect(() => {
-    setLoading(true);
-    fadeAnim.setValue(0);
-    loadEntries(period);
-  }, [period]);
+    loadData();
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    console.log("[History] Manual refresh");
-    await loadEntries(period);
+    console.log("[History] Manual refresh triggered");
+    await loadData();
     setRefreshing(false);
-  }, [period, loadEntries]);
-
-  // Aggregate data by day
-  const byDay = aggregateByDay(entries);
-  const sortedDays = Array.from(byDay.keys()).sort();
-  const numDays = parseInt(period);
-
-  // Fill missing days
-  const allDays: string[] = [];
-  for (let i = numDays - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    allDays.push(d.toISOString().split("T")[0]);
-  }
-
-  const stressData = allDays.map((day) => {
-    const dayEntries = byDay.get(day) ?? [];
-    return avg(dayEntries.map((e) => e.stress_score));
-  });
-
-  const sleepScoreData = allDays.map((day) => {
-    const dayEntries = byDay.get(day) ?? [];
-    return avg(dayEntries.map((e) => e.sleep_score));
-  });
-
-  const hrvData = allDays.map((day) => {
-    const dayEntries = byDay.get(day) ?? [];
-    return avg(dayEntries.map((e) => e.hrv));
-  });
-
-  // Labels — show every Nth label to avoid crowding
-  const labelStep = numDays <= 7 ? 1 : Math.ceil(numDays / 7);
-  const labels = allDays.map((day, i) => (i % labelStep === 0 ? formatShortDate(day) : ""));
-
-  const hasStress = stressData.some((v) => v > 0);
-  const hasSleep = sleepScoreData.some((v) => v > 0);
-  const hasHrv = hrvData.some((v) => v > 0);
-
-  // 7-day moving average for HRV
-  const hrvMovingAvg = hrvData.map((_, i) => {
-    const window = hrvData.slice(Math.max(0, i - 6), i + 1).filter((v) => v > 0);
-    if (!window.length) return 0;
-    return Math.round(window.reduce((a, b) => a + b, 0) / window.length);
-  });
+  }, [loadData]);
 
   if (error && !loading) {
     return (
@@ -254,24 +335,67 @@ export default function HistoryScreen() {
           padding: 32,
         }}
       >
-        <AlertTriangle size={48} color={COLORS.danger} />
-        <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: "700", marginTop: 16, fontFamily: "SpaceGrotesk-Bold", textAlign: "center" }}>
-          Couldn't load history
+        <View
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 18,
+            backgroundColor: "rgba(239,68,68,0.12)",
+            alignItems: "center",
+            justifyContent: "center",
+            marginBottom: 16,
+          }}
+        >
+          <AlertTriangle size={28} color={COLORS.danger} />
+        </View>
+        <Text
+          style={{
+            color: COLORS.text,
+            fontSize: 18,
+            fontWeight: "700",
+            fontFamily: "SpaceGrotesk-Bold",
+            textAlign: "center",
+            marginBottom: 8,
+          }}
+        >
+          Impossible de charger l'historique
         </Text>
-        <Text style={{ color: COLORS.textSecondary, fontSize: 14, marginTop: 8, textAlign: "center", fontFamily: "SpaceGrotesk-Regular" }}>
+        <Text
+          style={{
+            color: COLORS.textSecondary,
+            fontSize: 14,
+            textAlign: "center",
+            fontFamily: "SpaceGrotesk-Regular",
+            lineHeight: 20,
+            marginBottom: 24,
+          }}
+        >
           {error}
         </Text>
         <AnimatedPressable
-          onPress={() => { setError(null); setLoading(true); loadEntries(period); }}
+          onPress={() => {
+            console.log("[History] Retry button pressed");
+            setError(null);
+            setLoading(true);
+            loadData();
+          }}
           style={{
-            marginTop: 24,
             backgroundColor: COLORS.primary,
             borderRadius: 12,
-            paddingHorizontal: 24,
-            paddingVertical: 12,
+            paddingHorizontal: 28,
+            paddingVertical: 13,
           }}
         >
-          <Text style={{ color: "#fff", fontWeight: "600", fontFamily: "SpaceGrotesk-SemiBold" }}>Try Again</Text>
+          <Text
+            style={{
+              color: "#fff",
+              fontWeight: "600",
+              fontFamily: "SpaceGrotesk-SemiBold",
+              fontSize: 15,
+            }}
+          >
+            Réessayer
+          </Text>
         </AnimatedPressable>
       </View>
     );
@@ -281,207 +405,94 @@ export default function HistoryScreen() {
     <View style={{ flex: 1, backgroundColor: COLORS.background }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + 16,
+          paddingTop: insets.top + 20,
           paddingBottom: 120,
           paddingHorizontal: 20,
         }}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.primary}
+          />
         }
       >
         {/* Header */}
-        <View style={{ marginBottom: 24 }}>
+        <Animated.View style={{ opacity: headerFade, marginBottom: 20 }}>
           <Text
             style={{
-              fontSize: 26,
+              fontSize: 28,
               fontWeight: "700",
               color: COLORS.text,
               fontFamily: "SpaceGrotesk-Bold",
               letterSpacing: -0.5,
             }}
           >
-            Performance History
+            Historique
           </Text>
-          <Text style={{ fontSize: 13, color: COLORS.textSecondary, marginTop: 4, fontFamily: "SpaceGrotesk-Regular" }}>
-            Track your health trends over time
+          <Text
+            style={{
+              fontSize: 13,
+              color: COLORS.textSecondary,
+              marginTop: 4,
+              fontFamily: "SpaceGrotesk-Regular",
+            }}
+          >
+            Suivez vos tendances de santé
           </Text>
-        </View>
-
-        {/* Period Selector */}
-        <View
-          style={{
-            flexDirection: "row",
-            backgroundColor: COLORS.surfaceSecondary,
-            borderRadius: 12,
-            padding: 4,
-            marginBottom: 28,
-            borderWidth: 1,
-            borderColor: COLORS.border,
-          }}
-        >
-          {(["7", "30"] as Period[]).map((p) => {
-            const isActive = period === p;
-            return (
-              <AnimatedPressable
-                key={p}
-                onPress={() => {
-                  console.log(`[History] Period changed to ${p} days`);
-                  setPeriod(p);
-                }}
-                style={{
-                  flex: 1,
-                  paddingVertical: 10,
-                  borderRadius: 10,
-                  alignItems: "center",
-                  backgroundColor: isActive ? COLORS.primary : "transparent",
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontWeight: "600",
-                    color: isActive ? "#fff" : COLORS.textSecondary,
-                    fontFamily: "SpaceGrotesk-SemiBold",
-                  }}
-                >
-                  {p} Days
-                </Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
-
-        <Animated.View style={{ opacity: fadeAnim }}>
-          {/* Stress Chart */}
-          <SectionHeader
-            icon={<TrendingUp size={18} color={COLORS.warning} />}
-            title="Stress Level"
-          />
-          <ChartCard>
-            {loading ? (
-              <View style={{ gap: 8 }}>
-                <SkeletonLine width="100%" height={120} borderRadius={8} />
-              </View>
-            ) : !hasStress ? (
-              <EmptyChart label="stress" />
-            ) : (
-              <LineChart
-                data={{
-                  labels,
-                  datasets: [
-                    {
-                      data: stressData.map((v) => Math.max(v, 0.1)),
-                      color: (opacity = 1) => `rgba(245, 158, 11, ${opacity})`,
-                      strokeWidth: 2,
-                    },
-                  ],
-                }}
-                width={chartWidth}
-                height={160}
-                chartConfig={{
-                  ...CHART_CONFIG,
-                  color: (opacity = 1) => `rgba(245, 158, 11, ${opacity})`,
-                  propsForDots: { r: "3", strokeWidth: "1", stroke: COLORS.warning },
-                }}
-                bezier
-                withInnerLines={false}
-                withOuterLines={false}
-                withShadow={false}
-                style={{ marginLeft: -16 }}
-                yAxisSuffix=""
-                fromZero
-                segments={4}
-              />
-            )}
-          </ChartCard>
-
-          {/* Sleep Chart */}
-          <SectionHeader
-            icon={<Moon size={18} color={COLORS.accent} />}
-            title="Sleep Quality"
-          />
-          <ChartCard>
-            {loading ? (
-              <SkeletonLine width="100%" height={120} borderRadius={8} />
-            ) : !hasSleep ? (
-              <EmptyChart label="sleep" />
-            ) : (
-              <BarChart
-                data={{
-                  labels,
-                  datasets: [
-                    {
-                      data: sleepScoreData.map((v) => Math.max(v, 0)),
-                    },
-                  ],
-                }}
-                width={chartWidth}
-                height={160}
-                chartConfig={{
-                  ...CHART_CONFIG,
-                  color: (opacity = 1) => `rgba(34, 211, 238, ${opacity})`,
-                  fillShadowGradient: COLORS.accent,
-                  fillShadowGradientOpacity: 0.8,
-                }}
-                style={{ marginLeft: -16 }}
-                fromZero
-                showValuesOnTopOfBars={false}
-                withInnerLines={false}
-                yAxisSuffix=""
-                yAxisLabel=""
-                segments={4}
-              />
-            )}
-          </ChartCard>
-
-          {/* HRV Chart */}
-          <SectionHeader
-            icon={<Activity size={18} color={COLORS.success} />}
-            title="HRV Trend"
-          />
-          <ChartCard>
-            {loading ? (
-              <SkeletonLine width="100%" height={120} borderRadius={8} />
-            ) : !hasHrv ? (
-              <EmptyChart label="HRV" />
-            ) : (
-              <LineChart
-                data={{
-                  labels,
-                  datasets: [
-                    {
-                      data: hrvData.map((v) => Math.max(v, 0.1)),
-                      color: (opacity = 1) => `rgba(16, 185, 129, ${opacity * 0.4})`,
-                      strokeWidth: 1,
-                    },
-                    {
-                      data: hrvMovingAvg.map((v) => Math.max(v, 0.1)),
-                      color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`,
-                      strokeWidth: 2,
-                    },
-                  ],
-                  legend: ["HRV", "7-day avg"],
-                }}
-                width={chartWidth}
-                height={160}
-                chartConfig={{
-                  ...CHART_CONFIG,
-                  color: (opacity = 1) => `rgba(16, 185, 129, ${opacity})`,
-                  propsForDots: { r: "3", strokeWidth: "1", stroke: COLORS.success },
-                }}
-                bezier
-                withInnerLines={false}
-                withOuterLines={false}
-                withShadow={false}
-                style={{ marginLeft: -16 }}
-                yAxisSuffix=" ms"
-                fromZero
-                segments={4}
-              />
-            )}
-          </ChartCard>
         </Animated.View>
+
+        {/* Period selector */}
+        <PeriodSelector active={viewMode} onChange={setViewMode} />
+
+        {/* Content */}
+        {viewMode === "jour" && (
+          <>
+            {loading ? (
+              <>
+                {[0, 1, 2, 3].map((i) => (
+                  <SkeletonDayCard key={i} index={i} />
+                ))}
+              </>
+            ) : allData.length === 0 ? (
+              <EmptyDayState />
+            ) : (
+              allData.map((day, index) => (
+                <DayCard
+                  key={day.date}
+                  day={day}
+                  index={index}
+                  onPress={(d) => {
+                    console.log(`[History] Day detail opened: ${d.date}`);
+                  }}
+                />
+              ))
+            )}
+          </>
+        )}
+
+        {viewMode === "semaine" && (
+          <WeeklyReport
+            allData={allData}
+            weekOffset={weekOffset}
+            onWeekChange={(offset) => {
+              console.log(`[History] Weekly view offset changed: ${offset}`);
+              setWeekOffset(offset);
+            }}
+          />
+        )}
+
+        {viewMode === "mois" && (
+          <MonthlyReport
+            allData={allData}
+            monthOffset={monthOffset}
+            onMonthChange={(offset) => {
+              console.log(`[History] Monthly view offset changed: ${offset}`);
+              setMonthOffset(offset);
+            }}
+          />
+        )}
       </ScrollView>
     </View>
   );
