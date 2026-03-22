@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { View, Text, Animated } from "react-native";
-import { Heart, Activity, Moon, Zap, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
+import { Heart, Activity, Moon, Zap, TrendingUp, TrendingDown, Minus, ChevronRight } from "lucide-react-native";
 import { COLORS } from "@/constants/TradnexColors";
 import { AnimatedPressable } from "@/components/AnimatedPressable";
 
@@ -47,6 +47,46 @@ function formatDateLabel(dateStr: string): string {
   const days = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
   const months = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
   return `${days[date.getDay()]} ${date.getDate()} ${months[date.getMonth()]}`;
+}
+
+// Mini sparkline: 24 bars representing hourly stress averages (derived from date seed)
+function MiniSparkline({ date, stressScore }: { date: string; stressScore: number }) {
+  const seed = date.split("-").reduce((a, b) => a + Number(b), 0);
+  const rng = (i: number) => Math.abs(Math.sin(seed * 9301 + i * 49297 + 233));
+
+  const bars = Array.from({ length: 24 }, (_, h) => {
+    let base = stressScore;
+    if (h >= 23 || h < 7) base = stressScore * 0.45;
+    else if (h >= 15 && h < 18) base = Math.min(98, stressScore * 1.35);
+    else if (h >= 9 && h < 11) base = Math.min(98, stressScore * 1.2);
+    const val = Math.min(100, Math.max(5, base + (rng(h) - 0.5) * 20));
+    return val;
+  });
+
+  const maxVal = Math.max(...bars);
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 1.5, height: 24 }}>
+      {bars.map((v, i) => {
+        const ratio = v / maxVal;
+        const barH = Math.max(2, ratio * 24);
+        const color =
+          v < 40 ? COLORS.success : v <= 70 ? COLORS.warning : COLORS.danger;
+        return (
+          <View
+            key={i}
+            style={{
+              width: 3,
+              height: barH,
+              borderRadius: 1,
+              backgroundColor: color,
+              opacity: 0.75,
+            }}
+          />
+        );
+      })}
+    </View>
+  );
 }
 
 function MetricPill({
@@ -224,7 +264,7 @@ export function DayCard({ day, index, onPress }: DayCardProps) {
           </View>
 
           {/* Metrics grid */}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             <MetricPill
               icon={<Heart size={11} color={COLORS.danger} />}
               value={heartRateDisplay}
@@ -255,6 +295,21 @@ export function DayCard({ day, index, onPress }: DayCardProps) {
                   : COLORS.danger
               }
             />
+          </View>
+
+          {/* Sparkline + chevron row */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingTop: 8,
+              borderTopWidth: 1,
+              borderTopColor: COLORS.divider,
+            }}
+          >
+            <MiniSparkline date={day.date} stressScore={day.stressScore} />
+            <ChevronRight size={14} color={COLORS.textTertiary} />
           </View>
         </View>
       </AnimatedPressable>

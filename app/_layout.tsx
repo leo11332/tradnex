@@ -162,6 +162,10 @@ function AppContent() {
           name="notification-preferences"
           options={{ headerShown: false }}
         />
+        <Stack.Screen
+          name="day-detail"
+          options={{ headerShown: false }}
+        />
       </Stack>
     </>
   );
