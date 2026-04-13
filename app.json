@@ -4,10 +4,10 @@
     "slug": "tradnex",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/app-icon-bdv.png",
+    "icon": "./assets/images/logo_1024x1024.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/images/app-icon-bdv.png",
+      "image": "./assets/images/logo_1024x1024.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
@@ -33,7 +33,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/app-icon-bdv.png",
+        "foregroundImage": "./assets/images/logo_1024x1024.png",
         "backgroundColor": "#000000"
       },
       "package": "com.placeholder.app",
