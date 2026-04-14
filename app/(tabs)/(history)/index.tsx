@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { CalendarDays, BarChart3, Calendar, AlertTriangle, ClipboardList } from "lucide-react-native";
 import { COLORS } from "@/constants/TradnexColors";
 import { apiGet } from "@/utils/api";
@@ -270,6 +271,7 @@ function convertEntriesToDayData(entries: HealthEntry[]): DayData[] {
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const [viewMode, setViewMode] = useState<ViewMode>("jour");
   const [allData, setAllData] = useState<DayData[]>([]);
@@ -464,7 +466,8 @@ export default function HistoryScreen() {
                   day={day}
                   index={index}
                   onPress={(d) => {
-                    console.log(`[History] Day detail opened: ${d.date}`);
+                    console.log(`[History] Day card pressed, navigating to day-detail: ${d.date}`);
+                    router.push(`/day-detail?date=${d.date}`);
                   }}
                 />
               ))
